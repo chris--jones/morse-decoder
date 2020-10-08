@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Morsify Test</title>
+    <script src="morsify.js"></script>
+</head>
+<body>
+    <input id="morseText" type="text" value="SMS" onkeyup="changeText">
+    <br />
+    <button onClick="playAudio()">Play</button>
+    <button onClick="stopAudio()">Stop</button>
+    <button onClick="exportWave()">Download</button>
+    <button onClick="updatePlayer()">To Audio Player</button>
+    <br />
+    <audio controls></audio>
+    <script>        
+        let audio = morsify.audio(document.getElementById('morseText').value);
+
+        function playAudio() {
+            audio = morsify.audio(document.getElementById('morseText').value);
+            audio.play();
+        }
+
+        function stopAudio() {
+            audio.stop();
+        }
+
+        const exportWave = () => {
+            audio.exportWave();
+        }
+
+        const updatePlayer = async() => {
+            const url = await audio.getWaveUrl();
+            document.querySelector('audio').src = url;
+        }
+        </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 const getGainTimings = (morse: string, opts: Options, currentTime = 0): [[[number, number]?], number] => {
   const timings: [[number, number]?] = [];
-  let {unit, fwUnit} = opts;
+  let { unit, fwUnit } = opts;
   let time = 0;
 
   if (opts.wpm) {
@@ -106,14 +106,12 @@ const audio = (morse: string, options: Options) => {
   let context: AudioContext = null;
   let offlineContext: OfflineAudioContext = null;
   let source: AudioBufferSourceNode;
+  let sourceStarted: boolean = false;
 
   const [gainValues, totalTime] = getGainTimings(morse, options);
 
   if (AudioContext === null && typeof window !== 'undefined') {
     AudioContext = window.AudioContext || window.webkitAudioContext;
-    context = new AudioContext();
-    source = context.createBufferSource();
-    source.connect(context.destination);
   }
 
   if (OfflineAudioContext === null && typeof window !== 'undefined') {
@@ -131,35 +129,49 @@ const audio = (morse: string, options: Options) => {
 
   oscillator.connect(gainNode);
   gainNode.connect(offlineContext.destination);
-  source.onended = options.oscillator.onended;
+
+  const initAudio = async () => {
+    if (!context) {
+      context = new AudioContext();
+    }
+    source = context.createBufferSource();
+    source.buffer = await audioBuffer;
+    source.onended = options.oscillator.onended;
+    source.connect(context.destination);
+  }
 
   // Inspired by: http://joesul.li/van/tale-of-no-clocks/
-  const render = new Promise<void>(resolve => {
+  const audioBuffer = new Promise<AudioBuffer>(resolve => {
     oscillator.start(0);
     offlineContext.startRendering();
-    offlineContext.oncomplete = (e) => {
-      source.buffer = e.renderedBuffer;
-      resolve();
-    };
+    offlineContext.oncomplete = (e) => { resolve(e.renderedBuffer); };
   });
 
-  let timeout: number;
-
   const play = async () => {
-    await render;
-    source.start(context.currentTime);
-    timeout = setTimeout(() => { stop() }, totalTime * 1000);
+    if (!sourceStarted) {
+      sourceStarted = true;
+      await initAudio();
+      source.start(context.currentTime);
+    } else if (context.state === 'suspended') {
+      context.resume();
+    }
   };
 
+  const pause = () => {
+    if (context.state === 'running') {
+      context.suspend();
+    }
+  }
+
   const stop = () => {
-    clearTimeout(timeout);
-    timeout = 0;
     source.stop(0);
+    if (context.state === 'suspended') {
+      context.resume();
+    }
   };
 
   const getWaveBlob = async () => {
-    await render;
-    const waveData = encodeWAV(offlineContext.sampleRate, source.buffer.getChannelData(0));
+    const waveData = encodeWAV(offlineContext.sampleRate, (await audioBuffer).getChannelData(0));
     return new Blob([waveData], { 'type': 'audio/wav' });
   };
 
@@ -179,6 +191,7 @@ const audio = (morse: string, options: Options) => {
 
   return {
     play,
+    pause,
     stop,
     getWaveBlob,
     getWaveUrl,

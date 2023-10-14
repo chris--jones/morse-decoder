@@ -136,7 +136,7 @@ const audio = (morse: string, options: Options) => {
     }
     source = context.createBufferSource();
     source.buffer = await audioBuffer;
-    source.onended = options.oscillator.onended;
+    source.onended = function (ev) { stop(); options.oscillator.onended.bind(this)(ev) };
     source.connect(context.destination);
   }
 
@@ -164,9 +164,13 @@ const audio = (morse: string, options: Options) => {
   }
 
   const stop = () => {
-    source.stop(0);
-    if (context.state === 'suspended') {
-      context.resume();
+    if (sourceStarted) {
+      source.stop(0);
+      source.disconnect(context.destination);
+      if (context.state === 'suspended') {
+        context.resume();
+      }
+      sourceStarted = false;
     }
   };
 

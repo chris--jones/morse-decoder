@@ -1,17 +1,17 @@
 const getGainTimings = (morse: string, opts: Options, currentTime = 0): [[[number, number]?], number] => {
   const timings: [[number, number]?] = [];
-  let { unit, fwUnit } = opts;
+  let { unit, fwUnit } = opts?.audio;
   let time = 0;
 
-  if (opts.wpm) {
+  if (opts.audio.wpm) {
     // wpm mode uses standardised units
-    unit = fwUnit = 60 / (opts.wpm * 50)
+    unit = fwUnit = 60 / (opts.audio.wpm * 50)
   }
 
   timings.push([0, time]);
 
   const tone = (i: number) => {
-    timings.push([1 * (opts.volume / 100.0), currentTime + time]);
+    timings.push([1 * (opts.audio.volume / 100.0), currentTime + time]);
     time += i * unit;
   };
 
@@ -106,7 +106,9 @@ const audio = (morse: string, options: Options) => {
   let context: AudioContext = null;
   let offlineContext: OfflineAudioContext = null;
   let source: AudioBufferSourceNode;
+  let audioBuffer: AudioBuffer;
   let sourceStarted: boolean = false;
+  let audioRendered: boolean = false;
 
   const [gainValues, totalTime] = getGainTimings(morse, options);
 
@@ -122,8 +124,8 @@ const audio = (morse: string, options: Options) => {
   const oscillator = offlineContext.createOscillator();
   const gainNode = offlineContext.createGain();
 
-  oscillator.type = options.oscillator.type;
-  oscillator.frequency.value = options.oscillator.frequency;
+  oscillator.type = options.audio.oscillator.type;
+  oscillator.frequency.value = options.audio.oscillator.frequency;
 
   gainValues.forEach(([value, time]) => gainNode.gain.setValueAtTime(value, time));
 
@@ -133,25 +135,35 @@ const audio = (morse: string, options: Options) => {
   const initAudio = async () => {
     if (!context) {
       context = new AudioContext();
+      context.onstatechange = options.audio.onstatechange;
     }
     source = context.createBufferSource();
-    source.buffer = await audioBuffer;
-    source.onended = function (ev) { stop(); options.oscillator.onended.bind(this)(ev) };
+    source.buffer = await render();
+    source.onended = (ev) => { stop(); options.audio.onstopped.bind(source)(ev) };
     source.connect(context.destination);
   }
 
   // Inspired by: http://joesul.li/van/tale-of-no-clocks/
-  const audioBuffer = new Promise<AudioBuffer>(resolve => {
-    oscillator.start(0);
-    offlineContext.startRendering();
-    offlineContext.oncomplete = (e) => { resolve(e.renderedBuffer); };
-  });
+  const render = async () => {
+    if (!audioRendered) {
+      audioBuffer = await new Promise<AudioBuffer>(resolve => {
+        oscillator.start(0);
+        offlineContext.startRendering();
+        offlineContext.oncomplete = (e) => {
+          audioRendered = true;
+          resolve(e.renderedBuffer);
+        };
+      });
+    }
+    return audioBuffer;
+  }
 
   const play = async () => {
     if (!sourceStarted) {
       sourceStarted = true;
       await initAudio();
-      source.start(context.currentTime);
+      source.start();
+      options.audio.onstarted?.bind(source)();
     } else if (context.state === 'suspended') {
       context.resume();
     }
@@ -165,7 +177,7 @@ const audio = (morse: string, options: Options) => {
 
   const stop = () => {
     if (sourceStarted) {
-      source.stop(0);
+      source.stop();
       source.disconnect(context.destination);
       if (context.state === 'suspended') {
         context.resume();
@@ -174,8 +186,10 @@ const audio = (morse: string, options: Options) => {
     }
   };
 
+  const getCurrentTime = () => sourceStarted ? (context.currentTime % totalTime) : totalTime;
+
   const getWaveBlob = async () => {
-    const waveData = encodeWAV(offlineContext.sampleRate, (await audioBuffer).getChannelData(0));
+    const waveData = encodeWAV(offlineContext.sampleRate, (await render()).getChannelData(0));
     return new Blob([waveData], { 'type': 'audio/wav' });
   };
 
@@ -197,6 +211,8 @@ const audio = (morse: string, options: Options) => {
     play,
     pause,
     stop,
+    getCurrentTime,
+    totalTime,
     getWaveBlob,
     getWaveUrl,
     exportWave,

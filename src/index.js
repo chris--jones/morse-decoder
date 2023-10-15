@@ -124,23 +124,32 @@ const swapCharacters = (options) => {
 };
 
 const getOptions = (opts = {}) => {
-    var _a, _b, _c;
-    const options = Object.assign(Object.assign({}, opts), { dash: opts.dash || '-', dot: opts.dot || '.', space: opts.space || '/', separator: opts.separator || ' ', invalid: opts.invalid || '#', priority: opts.priority || 1, wpm: opts.wpm, unit: opts.unit || 0.08, fwUnit: opts.fwUnit || opts.unit || 0.08, volume: opts.volume || 100, oscillator: Object.assign(Object.assign({}, opts.oscillator), { type: ((_a = opts.oscillator) === null || _a === void 0 ? void 0 : _a.type) || 'sine', frequency: ((_b = opts.oscillator) === null || _b === void 0 ? void 0 : _b.frequency) || 500, onended: ((_c = opts.oscillator) === null || _c === void 0 ? void 0 : _c.onended) || null // event that fires when the tone has stopped playing
-         }) });
+    var _a, _b;
+    const options = Object.assign(Object.assign({}, opts), { dash: opts.dash || '-', dot: opts.dot || '.', space: opts.space || '/', separator: opts.separator || ' ', invalid: opts.invalid || '#', priority: opts.priority || 1, audio: {
+            wpm: opts.audio.wpm,
+            unit: opts.audio.unit || 0.08,
+            fwUnit: opts.audio.fwUnit || opts.audio.unit || 0.08,
+            volume: opts.audio.volume || 100,
+            oscillator: Object.assign(Object.assign({}, opts.audio.oscillator), { type: ((_a = opts.audio.oscillator) === null || _a === void 0 ? void 0 : _a.type) || 'sine', frequency: ((_b = opts.audio.oscillator) === null || _b === void 0 ? void 0 : _b.frequency) || 500 // value in hertz
+             }),
+            onstarted: opts.audio.onstarted || null,
+            onstopped: opts.audio.onstopped || null,
+            onstatechange: opts.audio.onstatechange || null
+        } });
     return options;
 };
 
 const getGainTimings = (morse, opts, currentTime = 0) => {
     const timings = [];
-    let { unit, fwUnit } = opts;
+    let { unit, fwUnit } = opts === null || opts === void 0 ? void 0 : opts.audio;
     let time = 0;
-    if (opts.wpm) {
+    if (opts.audio.wpm) {
         // wpm mode uses standardised units
-        unit = fwUnit = 60 / (opts.wpm * 50);
+        unit = fwUnit = 60 / (opts.audio.wpm * 50);
     }
     timings.push([0, time]);
     const tone = (i) => {
-        timings.push([1 * (opts.volume / 100.0), currentTime + time]);
+        timings.push([1 * (opts.audio.volume / 100.0), currentTime + time]);
         time += i * unit;
     };
     const silence = (i) => {
@@ -229,12 +238,12 @@ const audio = (morse, options) => {
     let context = null;
     let offlineContext = null;
     let source;
+    let audioBuffer;
+    let sourceStarted = false;
+    let audioRendered = false;
     const [gainValues, totalTime] = getGainTimings(morse, options);
     if (AudioContext === null && typeof window !== 'undefined') {
         AudioContext = window.AudioContext || window.webkitAudioContext;
-        context = new AudioContext();
-        source = context.createBufferSource();
-        source.connect(context.destination);
     }
     if (OfflineAudioContext === null && typeof window !== 'undefined') {
         OfflineAudioContext = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -242,35 +251,65 @@ const audio = (morse, options) => {
     }
     const oscillator = offlineContext.createOscillator();
     const gainNode = offlineContext.createGain();
-    oscillator.type = options.oscillator.type;
-    oscillator.frequency.value = options.oscillator.frequency;
+    oscillator.type = options.audio.oscillator.type;
+    oscillator.frequency.value = options.audio.oscillator.frequency;
     gainValues.forEach(([value, time]) => gainNode.gain.setValueAtTime(value, time));
     oscillator.connect(gainNode);
     gainNode.connect(offlineContext.destination);
-    source.onended = options.oscillator.onended;
+    const initAudio = async () => {
+        if (!context) {
+            context = new AudioContext();
+            context.onstatechange = options.audio.onstatechange;
+        }
+        source = context.createBufferSource();
+        source.buffer = await render();
+        source.onended = (ev) => { stop(); options.audio.onstopped.bind(source)(ev); };
+        source.connect(context.destination);
+    };
     // Inspired by: http://joesul.li/van/tale-of-no-clocks/
-    const render = new Promise(resolve => {
-        oscillator.start(0);
-        offlineContext.startRendering();
-        offlineContext.oncomplete = (e) => {
-            source.buffer = e.renderedBuffer;
-            resolve();
-        };
-    });
-    let timeout;
+    const render = async () => {
+        if (!audioRendered) {
+            audioBuffer = await new Promise(resolve => {
+                oscillator.start(0);
+                offlineContext.startRendering();
+                offlineContext.oncomplete = (e) => {
+                    audioRendered = true;
+                    resolve(e.renderedBuffer);
+                };
+            });
+        }
+        return audioBuffer;
+    };
     const play = async () => {
-        await render;
-        source.start(context.currentTime);
-        timeout = setTimeout(() => { stop(); }, totalTime * 1000);
+        var _a;
+        if (!sourceStarted) {
+            sourceStarted = true;
+            await initAudio();
+            source.start();
+            (_a = options.audio.onstarted) === null || _a === void 0 ? void 0 : _a.bind(source)();
+        }
+        else if (context.state === 'suspended') {
+            context.resume();
+        }
+    };
+    const pause = () => {
+        if (context.state === 'running') {
+            context.suspend();
+        }
     };
     const stop = () => {
-        clearTimeout(timeout);
-        timeout = 0;
-        source.stop(0);
+        if (sourceStarted) {
+            source.stop();
+            source.disconnect(context.destination);
+            if (context.state === 'suspended') {
+                context.resume();
+            }
+            sourceStarted = false;
+        }
     };
+    const getCurrentTime = () => sourceStarted ? (context.currentTime % totalTime) : totalTime;
     const getWaveBlob = async () => {
-        await render;
-        const waveData = encodeWAV(offlineContext.sampleRate, source.buffer.getChannelData(0));
+        const waveData = encodeWAV(offlineContext.sampleRate, (await render()).getChannelData(0));
         return new Blob([waveData], { 'type': 'audio/wav' });
     };
     const getWaveUrl = async () => {
@@ -287,7 +326,10 @@ const audio = (morse, options) => {
     };
     return {
         play,
+        pause,
         stop,
+        getCurrentTime,
+        totalTime,
         getWaveBlob,
         getWaveUrl,
         exportWave,

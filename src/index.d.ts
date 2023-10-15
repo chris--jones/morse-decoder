@@ -8,7 +8,17 @@ type Characters = Record<string, Record<string, string>>
 interface Oscillator {
   type?: OscillatorType;
   frequency?: number;
-  onended?: ((this: AudioScheduledSourceNode, ev: Event) => any) | null;
+}
+
+interface AudioOptions {
+  wpm?: number;
+  unit: number;
+  fwUnit: number;
+  volume: number;
+  oscillator: Oscillator;
+  onstatechange?: ((this: BaseAudioContext, ev: Event) => any) | null;
+  onstarted?: ((this: AudioScheduledSourceNode, ev: Event) => any) | null;
+  onstopped?: ((this: AudioScheduledSourceNode, ev: Event) => any) | null;
 }
 
 interface Options {
@@ -18,9 +28,5 @@ interface Options {
   separator: string;
   invalid: string;
   priority: number;
-  wpm?: number;
-  unit: number;
-  fwUnit: number;
-  volume: number;
-  oscillator: Oscillator
+  audio?: AudioOptions;
 }

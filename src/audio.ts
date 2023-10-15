@@ -109,6 +109,7 @@ const audio = (morse: string, options: Options) => {
   let audioBuffer: AudioBuffer;
   let sourceStarted: boolean = false;
   let audioRendered: boolean = false;
+  let currentTimeOffset: number = 0;
 
   const [gainValues, totalTime] = getGainTimings(morse, options);
 
@@ -161,10 +162,11 @@ const audio = (morse: string, options: Options) => {
   const play = async () => {
     if (!sourceStarted) {
       sourceStarted = true;
+      currentTimeOffset = context?.currentTime || 0;
       await initAudio();
       source.start();
       options.audio.onstarted?.bind(source)();
-    } else if (context.state === 'suspended') {
+    } else if (context?.state === 'suspended') {
       context.resume();
     }
   };
@@ -186,7 +188,7 @@ const audio = (morse: string, options: Options) => {
     }
   };
 
-  const getCurrentTime = () => sourceStarted ? (context.currentTime % totalTime) : totalTime;
+  const getCurrentTime = () => sourceStarted ? (context.currentTime - currentTimeOffset) : totalTime;
 
   const getWaveBlob = async () => {
     const waveData = encodeWAV(offlineContext.sampleRate, (await render()).getChannelData(0));

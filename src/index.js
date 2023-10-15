@@ -241,6 +241,7 @@ const audio = (morse, options) => {
     let audioBuffer;
     let sourceStarted = false;
     let audioRendered = false;
+    let currentTimeOffset = 0;
     const [gainValues, totalTime] = getGainTimings(morse, options);
     if (AudioContext === null && typeof window !== 'undefined') {
         AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -284,11 +285,12 @@ const audio = (morse, options) => {
         var _a;
         if (!sourceStarted) {
             sourceStarted = true;
+            currentTimeOffset = (context === null || context === void 0 ? void 0 : context.currentTime) || 0;
             await initAudio();
             source.start();
             (_a = options.audio.onstarted) === null || _a === void 0 ? void 0 : _a.bind(source)();
         }
-        else if (context.state === 'suspended') {
+        else if ((context === null || context === void 0 ? void 0 : context.state) === 'suspended') {
             context.resume();
         }
     };
@@ -307,7 +309,7 @@ const audio = (morse, options) => {
             sourceStarted = false;
         }
     };
-    const getCurrentTime = () => sourceStarted ? (context.currentTime % totalTime) : totalTime;
+    const getCurrentTime = () => sourceStarted ? (context.currentTime - currentTimeOffset) : totalTime;
     const getWaveBlob = async () => {
         const waveData = encodeWAV(offlineContext.sampleRate, (await render()).getChannelData(0));
         return new Blob([waveData], { 'type': 'audio/wav' });

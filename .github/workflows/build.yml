@@ -17,3 +17,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build-rel
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./dist/morse-decoder.min.js

@@ -4,18 +4,17 @@ on:
       - main
       - feature/github-actions
   workflow_dispatch:
-
+  
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
     steps:
-      uses: actions/checkout@v3
-      uses: actions/setup-node@v3
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
         with:
           node-version: 18
           cache: 'npm'
           cache-dependency-path: package-lock.json
-      run: |
-        npm ci
-        npm test
-        npm run build-rel
+      - run: npm ci
+      - run: npm test
+      - run: npm run build-rel
